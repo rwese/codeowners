@@ -1,17 +1,98 @@
 package codeowners
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestParseRule(t *testing.T) {
+func TestParseFile(t *testing.T) {
 	examples := []struct {
 		name     string
-		rule     string
-		expected Rule
+		contents string
+		expected Ruleset
 		err      string
+	}{
+		// Success cases
+		{
+			name:     "empty file",
+			contents: "",
+			expected: Ruleset{},
+		},
+		{
+			name:     "single rule",
+			contents: "file.txt @user",
+			expected: Ruleset{
+				{
+					pattern:    mustBuildPattern(t, "file.txt"),
+					Owners:     []Owner{{Value: "user", Type: "username"}},
+					LineNumber: 1,
+				},
+			},
+		},
+		{
+			name:     "multiple rules",
+			contents: "file.txt @user\nfile2.txt @org/team",
+			expected: Ruleset{
+				{
+					pattern:    mustBuildPattern(t, "file.txt"),
+					Owners:     []Owner{{Value: "user", Type: "username"}},
+					LineNumber: 1,
+				},
+				{
+					pattern:    mustBuildPattern(t, "file2.txt"),
+					Owners:     []Owner{{Value: "org/team", Type: "team"}},
+					LineNumber: 2,
+				},
+			},
+		},
+		{
+			name:     "with blank lines with whitespace",
+			contents: "\nfile.txt @user\n \t\nfile2.txt @org/team\n",
+			expected: Ruleset{
+				{
+					pattern:    mustBuildPattern(t, "file.txt"),
+					Owners:     []Owner{{Value: "user", Type: "username"}},
+					LineNumber: 2,
+				},
+				{
+					pattern:    mustBuildPattern(t, "file2.txt"),
+					Owners:     []Owner{{Value: "org/team", Type: "team"}},
+					LineNumber: 4,
+				},
+			},
+		},
+
+		// Error cases
+		{
+			name:     "malformed rule",
+			contents: "malformed rule\n",
+			err:      "line 1: invalid owner format 'rule' at position 11",
+		},
+	}
+
+	for _, e := range examples {
+		t.Run("parses "+e.name, func(t *testing.T) {
+			reader := strings.NewReader(e.contents)
+			actual, err := ParseFile(reader)
+			if e.err != "" {
+				assert.EqualError(t, err, e.err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, e.expected, actual)
+			}
+		})
+	}
+}
+
+func TestParseRule(t *testing.T) {
+	examples := []struct {
+		name          string
+		rule          string
+		ownerMatchers []OwnerMatcher
+		expected      Rule
+		err           string
 	}{
 		// Success cases
 		{
@@ -27,6 +108,38 @@ func TestParseRule(t *testing.T) {
 			rule: "file.txt @org/team",
 			expected: Rule{
 				pattern: mustBuildPattern(t, "file.txt"),
+				Owners:  []Owner{{Value: "org/team", Type: "team"}},
+			},
+		},
+		{
+			name: "team owners file with parentheses",
+			rule: "file(1).txt @org/team",
+			expected: Rule{
+				pattern: mustBuildPattern(t, "file(1).txt"),
+				Owners:  []Owner{{Value: "org/team", Type: "team"}},
+			},
+		},
+		{
+			name: "team owners file with one parentheses on the left",
+			rule: "file(1.txt @user",
+			expected: Rule{
+				pattern: mustBuildPattern(t, "file(1.txt"),
+				Owners:  []Owner{{Value: "user", Type: "username"}},
+			},
+		},
+		{
+			name: "team owners file with one parentheses on the right",
+			rule: "file1).txt foo@example.com",
+			expected: Rule{
+				pattern: mustBuildPattern(t, "file1).txt"),
+				Owners:  []Owner{{Value: "foo@example.com", Type: "email"}},
+			},
+		},
+		{
+			name: "team owners file with parentheses in the folder name",
+			rule: "(folder)/file.txt @org/team",
+			expected: Rule{
+				pattern: mustBuildPattern(t, "(folder)/file.txt"),
 				Owners:  []Owner{{Value: "org/team", Type: "team"}},
 			},
 		},
@@ -142,11 +255,42 @@ func TestParseRule(t *testing.T) {
 			rule: "file.txt missing-at-sign",
 			err:  "invalid owner format 'missing-at-sign' at position 10",
 		},
+		{
+			name: "email owners without email matcher",
+			rule: "file.txt foo@example.com",
+			ownerMatchers: []OwnerMatcher{
+				OwnerMatchFunc(MatchTeamOwner),
+				OwnerMatchFunc(MatchUsernameOwner),
+			},
+			err: "invalid owner format 'foo@example.com' at position 10",
+		},
+		{
+			name: "team owners without team matcher",
+			rule: "file.txt @org/team",
+			ownerMatchers: []OwnerMatcher{
+				OwnerMatchFunc(MatchEmailOwner),
+				OwnerMatchFunc(MatchUsernameOwner),
+			},
+			err: "invalid owner format '@org/team' at position 10",
+		},
+		{
+			name: "username owners without username matcher",
+			rule: "file.txt @user",
+			ownerMatchers: []OwnerMatcher{
+				OwnerMatchFunc(MatchEmailOwner),
+				OwnerMatchFunc(MatchTeamOwner),
+			},
+			err: "invalid owner format '@user' at position 10",
+		},
 	}
 
 	for _, e := range examples {
 		t.Run("parses "+e.name, func(t *testing.T) {
-			actual, err := parseRule(e.rule)
+			opts := parseOptions{ownerMatchers: DefaultOwnerMatchers}
+			if e.ownerMatchers != nil {
+				opts.ownerMatchers = e.ownerMatchers
+			}
+			actual, err := parseRule(e.rule, opts)
 			if e.err != "" {
 				assert.EqualError(t, err, e.err)
 			} else {
