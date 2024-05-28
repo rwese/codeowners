@@ -111,7 +111,7 @@ func ParseFile(f io.Reader, options ...parseOption) (Ruleset, error) {
 		line := strings.TrimSpace(scanner.Text())
 
 		// Ignore blank lines and comments
-		if len(line) == 0 || line[0] == '#' {
+		if len(strings.TrimSpace(line)) == 0 || line[0] == '#' {
 			continue
 		}
 
