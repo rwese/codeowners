@@ -47,9 +47,8 @@ var ErrNoMatch = errors.New("no match")
 
 var (
 	emailRegexp    = regexp.MustCompile(`\A[A-Z0-9a-z\._%\+\-]+@[A-Za-z0-9\.\-]+\.[A-Za-z]{2,6}\z`)
-	teamRegexp     = regexp.MustCompile(`\A@([a-zA-Z0-9\-]+\/[a-zA-Z0-9_\-]+)\z`)
-	usernameRegexp = regexp.MustCompile(`\A@([a-zA-Z0-9\-_]+)\z`)
-	groupRegexp    = regexp.MustCompile(`\A@(([a-zA-Z0-9\-_]+)(/[a-zA-Z0-9\-_]+)*)\z`)
+	teamRegexp     = regexp.MustCompile(`\A@(([a-zA-Z0-9\-_]+)([\/][a-zA-Z0-9\-_]+)+)\z`)
+	usernameRegexp = regexp.MustCompile(`\A@(([a-zA-Z0-9\-_]+)([\._][a-zA-Z0-9\-_]+)*)\z`)
 )
 
 // DefaultOwnerMatchers is the default set of owner matchers, which includes the
@@ -58,7 +57,6 @@ var DefaultOwnerMatchers = []OwnerMatcher{
 	OwnerMatchFunc(MatchEmailOwner),
 	OwnerMatchFunc(MatchTeamOwner),
 	OwnerMatchFunc(MatchUsernameOwner),
-	OwnerMatchFunc(MatchGroupOwner),
 }
 
 // OwnerMatchFunc is a function that matches a string against a pattern and
@@ -102,15 +100,6 @@ func MatchUsernameOwner(s string) (Owner, error) {
 	}
 
 	return Owner{Value: match[1], Type: UsernameOwner}, nil
-}
-
-func MatchGroupOwner(s string) (Owner, error) {
-	match := groupRegexp.FindStringSubmatch(s)
-	if match == nil {
-		return Owner{}, ErrNoMatch
-	}
-
-	return Owner{Value: match[1], Type: GroupOwner}, nil
 }
 
 // ParseFile parses a CODEOWNERS file, returning a set of rules.
